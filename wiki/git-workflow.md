@@ -17,7 +17,7 @@ Outline:
 - [Switch to the `main` branch](#switch-to-the-main-branch)
 - [Pull changes from `main` on `origin`](#pull-changes-from-main-on-origin)
 - [Pull changes from `main` on `upstream`](#pull-changes-from-main-on-upstream)
-- [Switch to a new branch](#switch-to-a-new-branch)
+- [Switch to the `<task-branch>`](#switch-to-the-task-branch)
   - [`<task-branch>`](#task-branch)
 - [Edit files](#edit-files)
 - [Commit](#commit)
@@ -47,9 +47,9 @@ Outline:
 
 [Pull changes](./git-vscode.md#pull-changes-from-the-branch-on-remote) from `main` on [`upstream`](./github.md#upstream) to get the latest fixes from the instructors' repository.
 
-## Switch to a new branch
+## Switch to the `<task-branch>`
 
-[Create a new branch and switch to it](./git-vscode.md#switch-to-a-new-branch).
+[Create a new `<task-branch>` and switch to it](./git-vscode.md#switch-to-a-new-branch).
 
 ### `<task-branch>`
 
