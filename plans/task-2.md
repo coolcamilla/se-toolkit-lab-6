@@ -1,93 +1,16 @@
-# Agent Documentation
+# Task 2: Agentic Loop Implementation Plan
 
 ## Overview
 
-This agent answers questions using a Large Language Model (LLM) via an OpenAI-compatible API, with access to tools for reading files and listing directories in the project repository.
-
-## LLM Provider
-
-**OpenRouter** is configured as the LLM provider.
-
-- **API Base URL:** `https://openrouter.ai/api/v1`
-- **Model:** `meta-llama/llama-3.3-70b-instruct:free`
-
-OpenRouter provides access to multiple LLM providers through a unified API. The free tier is suitable for development and testing.
-
-### Alternative: Local Qwen API
-
-If you have a local Qwen API running (e.g., on a VM), you can switch to it by editing `.env.agent.secret`:
-
-```env
-LLM_API_BASE=http://<your-vm-ip>:<qwen-api-port>/v1
-LLM_MODEL=qwen3-coder-plus
-```
-
-## Configuration
-
-1. Copy the example environment file:
-
-   ```bash
-   cp .env.agent.example .env.agent.secret
-   ```
-
-2. Edit `.env.agent.secret` and set your API credentials:
-
-   ```env
-   LLM_API_KEY=your-api-key-here
-   LLM_API_BASE=https://openrouter.ai/api/v1
-   LLM_MODEL=meta-llama/llama-3.3-70b-instruct:free
-   ```
-
-## Usage
-
-Run the agent with a question as the first command-line argument:
-
-```bash
-uv run agent.py "What does REST stand for?"
-```
-
-### Output
-
-The agent outputs a single JSON line to stdout:
-
-```json
-{
-  "answer": "Representational State Transfer.",
-  "source": "wiki/rest-api.md#what-is-rest",
-  "tool_calls": [
-    {"tool": "list_files", "args": {"path": "wiki"}, "result": "rest-api.md\n..."},
-    {"tool": "read_file", "args": {"path": "wiki/rest-api.md"}, "result": "..."}
-  ]
-}
-```
-
-- `answer` — The LLM's response to the question.
-- `source` — Reference to the source file where the answer was found (file path + section anchor).
-- `tool_calls` — List of tool calls made during execution, each with `tool`, `args`, and `result`.
+Implement an agentic loop that allows the LLM to use tools (`read_file`, `list_files`) to find answers in the project repository.
 
 ## Architecture
 
-### Components
+### 1. Tool Schema Definition
 
-1. **Environment Loading** — Uses `python-dotenv` to load LLM configuration from `.env.agent.secret`.
+Tools will be defined as Python functions with metadata for the LLM function-calling schema.
 
-2. **LLM Client** — Uses `httpx` to send HTTP POST requests to the LLM API endpoint with function-calling support.
-
-3. **Tools**:
-   - `read_file(path)` — Read contents of a file from the project repository.
-   - `list_files(path)` — List files and directories at a given path.
-
-4. **Agentic Loop** — Iteratively calls the LLM, executes tool calls, and feeds results back until a final answer is produced.
-
-5. **Error Handling**:
-   - **Rate Limiting (429)** — Implements exponential backoff with up to 3 retries.
-   - **Timeouts** — Retries on read timeouts with exponential backoff.
-   - **Configuration Errors** — Clear error messages if `LLM_API_BASE` or `LLM_API_KEY` are missing.
-   - **Path Security** — Rejects path traversal attempts (e.g., `../`).
-
-### Tool Schemas
-
-Tools are defined as function-calling schemas for the LLM:
+#### Tool Schema Structure
 
 ```python
 TOOL_DEFINITIONS = [
@@ -101,7 +24,7 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path from project root"
+                        "description": "Relative path from project root (e.g., 'wiki/rest-api.md')"
                     }
                 },
                 "required": ["path"]
@@ -118,7 +41,7 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative directory path from project root"
+                        "description": "Relative directory path from project root (e.g., 'wiki/')"
                     }
                 },
                 "required": ["path"]
@@ -128,26 +51,51 @@ TOOL_DEFINITIONS = [
 ]
 ```
 
-### Path Security
+### 2. Tool Implementation
 
-Tools validate paths to prevent directory traversal attacks:
+#### `read_file(path: str) -> str`
+
+```
+1. Resolve the path relative to project root
+2. Security check:
+   - Ensure resolved path is within project directory
+   - Reject paths containing ".." or absolute paths
+3. Read file contents
+4. Return contents or error message
+```
+
+#### `list_files(path: str) -> str`
+
+```
+1. Resolve the path relative to project root
+2. Security check:
+   - Ensure resolved path is within project directory
+   - Reject paths containing ".." or absolute paths
+3. List directory entries (files and subdirectories)
+4. Return newline-separated list or error message
+```
+
+### 3. Path Security
+
+**Threat:** Path traversal attacks (e.g., `../../.env.agent.secret`)
+
+**Mitigation:**
 
 ```python
-def is_safe_path(requested_path: str) -> bool:
+def is_safe_path(project_root: Path, requested_path: str) -> bool:
+    """Check if the requested path is within the project directory."""
     # Reject absolute paths
     if os.path.isabs(requested_path):
         return False
     
-    # Reject paths with .. components
-    if ".." in requested_path:
-        return False
+    # Resolve the full path
+    full_path = (project_root / requested_path).resolve()
     
-    # Resolve and check within project root
-    full_path = (PROJECT_ROOT / requested_path).resolve()
-    return str(full_path).startswith(str(PROJECT_ROOT))
+    # Ensure it's within project root
+    return str(full_path).startswith(str(project_root.resolve()))
 ```
 
-### Agentic Loop
+### 4. Agentic Loop
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -191,54 +139,83 @@ def is_safe_path(requested_path: str) -> bool:
 ┌─────────────────────────────────────────────────────────────┐
 │  6. Extract answer from final message                        │
 │     - Parse content for answer and source reference          │
-│     - Output JSON: {"answer": "...", "source": "...", ...}   │
+│     - Output JSON: {"answer": "...", "tool_calls": [...]}    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Loop Termination Conditions
+### 5. Loop Termination Conditions
 
 1. **LLM returns content without tool_calls** → Final answer found
 2. **10 tool calls reached** → Stop looping, use best available answer
 3. **Error in tool execution** → Return error message to LLM, let it decide
 
-### Data Flow
+### 6. System Prompt
 
 ```
-Question → Build messages → Call LLM → Parse response
-                                     │
-                     ┌───────────────┴───────────────┐
-                     │                               │
-              tool_calls?                         content?
-                     │                               │
-                     ▼                               ▼
-              Execute tools                    Extract answer
-                     │                               │
-                     ▼                               │
-              Append results                         │
-                     │                               │
-                     └───────────────┬───────────────┘
-                                     │
-                                     ▼
-                              Loop or output JSON
+You are a helpful assistant that answers questions using the project repository.
+
+You have access to these tools:
+- list_files(path): List files/directories at a given path
+- read_file(path): Read contents of a file
+
+Workflow:
+1. Use list_files to discover files in the wiki/ directory
+2. Use read_file to read relevant files and find the answer
+3. Include the source reference (file path + section anchor) in your answer
+
+Rules:
+- Always provide the source file path where you found the answer
+- If you can't find the answer after exploring, say so honestly
+- Don't make up information not present in the files
 ```
 
-## Dependencies
+### 7. Message Format
 
-- `httpx` — HTTP client for API requests.
-- `python-dotenv` — Load environment variables from `.env.agent.secret`.
-
-## Testing
-
-Run the regression test:
-
-```bash
-uv run pytest tests/test_agent.py -v
+```python
+messages = [
+    {"role": "system", "content": SYSTEM_PROMPT},
+    {"role": "user", "content": question},
+    # After tool calls:
+    # {"role": "assistant", "tool_calls": [...]},
+    # {"role": "tool", "tool_call_id": "...", "content": "..."},
+]
 ```
 
-The test verifies:
+### 8. Output Format
 
-- Agent outputs valid JSON
-- Required fields (`answer`, `source`, `tool_calls`) are present
-- Field types are correct
+```json
+{
+  "answer": "Representational State Transfer.",
+  "source": "wiki/rest-api.md#what-is-rest",
+  "tool_calls": [
+    {"name": "list_files", "arguments": {"path": "wiki"}},
+    {"name": "read_file", "arguments": {"path": "wiki/rest-api.md"}}
+  ]
+}
+```
 
-Note: The test is skipped if the LLM API returns 429 (rate limited).
+## Implementation Steps
+
+1. **Define tool schemas** — Create `TOOL_DEFINITIONS` for LLM API
+2. **Implement `read_file`** — With path security checks
+3. **Implement `list_files`** — With path security checks
+4. **Build agentic loop** — Main loop in `main()`
+5. **Update system prompt** — Include tool usage instructions
+6. **Update output format** — Include `source` field in JSON
+7. **Add tests** — Test tool execution and loop behavior
+
+## Testing Strategy
+
+1. **Unit tests for tools:**
+   - `read_file` with valid path → returns content
+   - `read_file` with `../` path → returns error
+   - `list_files` with valid path → returns listing
+   - `list_files` with `../` path → returns error
+
+2. **Integration tests:**
+   - Single tool call → correct output
+   - Multiple tool calls → loop completes
+   - 10 tool calls → loop terminates
+
+3. **E2E tests:**
+   - Ask question about wiki content → correct answer with source
