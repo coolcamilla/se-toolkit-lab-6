@@ -12,7 +12,7 @@ def test_agent_outputs_valid_json_structure():
     This test verifies the output structure when the LLM API is available.
     It may be skipped if the API returns 429 (rate limited).
     """
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).parent.parent
     agent_path = project_root / "agent.py"
 
     result = subprocess.run(
