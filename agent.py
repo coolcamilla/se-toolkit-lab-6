@@ -26,9 +26,15 @@ from dotenv import load_dotenv
 # Load LLM configuration from .env.agent.secret
 load_dotenv(".env.agent.secret")
 
+# LLM configuration
 LLM_API_BASE = os.getenv("LLM_API_BASE")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL")
+
+# Backend API configuration (load from .env.docker.secret)
+load_dotenv(".env.docker.secret", override=True)
+LMS_API_KEY = os.getenv("LMS_API_KEY")
+AGENT_API_BASE_URL = os.getenv("AGENT_API_BASE_URL", "http://localhost:42002")
 
 # Project root for tool path resolution
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -72,24 +78,62 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_api",
+            "description": "Query the backend API to get real-time data or perform actions. Use this for questions about database contents, statistics, or system state. Do NOT use for static documentation questions — use read_file or list_files for those.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (GET, POST, PUT, DELETE, etc.)",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API endpoint path (e.g., '/items/', '/analytics/completion-rate')",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "JSON request body for POST/PUT requests (optional)",
+                    },
+                    "auth": {
+                        "type": "boolean",
+                        "description": "Whether to include Authorization header (default: true). Set to false to test unauthenticated access.",
+                    },
+                },
+                "required": ["method", "path"],
+            },
+        },
+    },
 ]
 
 # System prompt for the agent
-SYSTEM_PROMPT = """You are a helpful assistant that answers questions using the project repository.
+SYSTEM_PROMPT = """You are a helpful assistant that answers questions using the project repository and backend API.
 
 You have access to these tools:
 - list_files(path): List files/directories at a given path
 - read_file(path): Read contents of a file
+- query_api(method, path, body, auth): Query the backend API for real-time data
 
-Workflow:
-1. Use list_files to discover files in the wiki/ directory
-2. Use read_file to read relevant files and find the answer
-3. Include the source reference (file path + section anchor) in your answer
+Decision workflow:
+1. For static documentation questions (e.g., "What is REST?", "How to protect a branch?") → use list_files and read_file in wiki/
+2. For data-dependent questions (e.g., "How many items?", "What's the completion rate?") → use query_api
+3. For system facts (e.g., "What framework?", "What port?") → use read_file on source code (backend/main.py, docker-compose.yml)
+4. To test unauthenticated access (e.g., "What status code without auth?") → use query_api with auth=false
+5. For bug diagnosis questions:
+   - First, query the API to reproduce the error and get the traceback
+   - Then, read the source code at the file/line mentioned in the traceback
+   - Explain the root cause and suggest a fix
 
 Rules:
-- Always provide the source file path where you found the answer
+- Always provide the source file path where you found the answer (for wiki/code questions)
+- For API queries, include the endpoint path in your answer
+- At the end of your answer, add a line: "Source: <file-path>" (e.g., "Source: backend/app/routers/analytics.py")
+- For bug diagnosis, always cite the source file where the bug is located
 - If you can't find the answer after exploring, say so honestly
-- Don't make up information not present in the files
+- Don't make up information not present in the files or API responses
 - When you find the answer, respond with the answer and source, do not make additional tool calls
 """
 
@@ -168,10 +212,101 @@ def list_files(path: str) -> str:
         return f"Error listing directory: {e}"
 
 
+def query_api(
+    method: str, path: str, body: str | None = None, auth: bool = True
+) -> str:
+    """Query the backend API with optional authentication.
+
+    Args:
+        method: HTTP method (GET, POST, PUT, DELETE, etc.)
+        path: API endpoint path (e.g., '/items/', '/analytics/completion-rate')
+        body: Optional JSON request body for POST/PUT requests
+        auth: Whether to include Authorization header (default: true)
+
+    Returns:
+        JSON string with status_code and body, or error message
+    """
+    import json as json_module
+
+    # Build the full URL
+    base_url = AGENT_API_BASE_URL.rstrip("/")
+    # Ensure path starts with /
+    if not path.startswith("/"):
+        path = "/" + path
+    url = f"{base_url}{path}"
+
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    # Add authorization header if requested
+    if auth:
+        if not LMS_API_KEY:
+            return json_module.dumps(
+                {
+                    "status_code": 500,
+                    "body": "Error: LMS_API_KEY not configured. Check .env.docker.secret.",
+                }
+            )
+        headers["Authorization"] = f"Bearer {LMS_API_KEY}"
+
+    try:
+        with httpx.Client() as client:
+            # Parse body if provided
+            json_body = None
+            if body:
+                json_body = json_module.loads(body)
+
+            # Make the request
+            if method.upper() == "GET":
+                response = client.get(url, headers=headers, timeout=30.0)
+            elif method.upper() == "POST":
+                response = client.post(
+                    url, headers=headers, json=json_body, timeout=30.0
+                )
+            elif method.upper() == "PUT":
+                response = client.put(
+                    url, headers=headers, json=json_body, timeout=30.0
+                )
+            elif method.upper() == "DELETE":
+                response = client.delete(url, headers=headers, timeout=30.0)
+            else:
+                return json_module.dumps(
+                    {
+                        "status_code": 400,
+                        "body": f"Error: Unsupported HTTP method '{method}'",
+                    }
+                )
+
+            # Return response as JSON string
+            return json_module.dumps(
+                {"status_code": response.status_code, "body": response.text}
+            )
+
+    except httpx.ReadTimeout as e:
+        return json_module.dumps(
+            {"status_code": 504, "body": f"Error: Request timed out: {e}"}
+        )
+    except httpx.ConnectError as e:
+        return json_module.dumps(
+            {
+                "status_code": 503,
+                "body": f"Error: Cannot connect to backend API at {url}: {e}",
+            }
+        )
+    except json_module.JSONDecodeError as e:
+        return json_module.dumps(
+            {"status_code": 400, "body": f"Error: Invalid JSON in body: {e}"}
+        )
+    except Exception as e:
+        return json_module.dumps({"status_code": 500, "body": f"Error: {e}"})
+
+
 # Map of tool names to functions
 TOOLS = {
     "read_file": read_file,
     "list_files": list_files,
+    "query_api": query_api,
 }
 
 
@@ -347,7 +482,8 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
 
         else:
             # LLM returned content without tool calls - final answer
-            answer = choice.get("content", "")
+            # Note: Use (choice.get("content") or "") because LLM may return content: null
+            answer = choice.get("content") or ""
             print(f"LLM returned final answer", file=sys.stderr)
 
             # Extract source from answer (look for source reference)
@@ -356,9 +492,26 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
                 # Try to extract source from the answer
                 import re
 
-                match = re.search(r"source:\s*(\S+)", answer, re.IGNORECASE)
-                if match:
-                    source = match.group(1)
+                # Match patterns like:
+                # - "Source: wiki/github.md"
+                # - "Source: `backend/app/routers/analytics.py`"
+                # - "Source: backend/app/routers/analytics.py, line 212"
+                # Find all matches and prefer file paths over API endpoints
+                matches = re.findall(
+                    r"source:\s*`?([a-zA-Z0-9_/.-]+\.(py|md|json|yml|yaml))",
+                    answer,
+                    re.IGNORECASE,
+                )
+                if matches:
+                    # Extract just the file paths (first group)
+                    file_paths = [m[0] for m in matches]
+                    # Prefer Python files
+                    for path in file_paths:
+                        if path.endswith(".py"):
+                            source = path
+                            break
+                    if not source:
+                        source = file_paths[0]
 
             return {
                 "answer": answer,
