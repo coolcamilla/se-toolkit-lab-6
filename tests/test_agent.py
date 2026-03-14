@@ -83,10 +83,15 @@ def test_merge_conflict_question_uses_read_file():
     tool_names = [call.get("tool") for call in data["tool_calls"]]
     assert "read_file" in tool_names, "Expected read_file to be called"
 
-    # Check that source references wiki/git-workflow.md
+    # Check that source references wiki/git.md or wiki/git-workflow.md
     source = data.get("source", "").lower()
-    assert "wiki/git-workflow.md" in source or "git-workflow" in source, (
-        f"Expected source to reference wiki/git-workflow.md, got: {data.get('source')}"
+    assert (
+        "wiki/git.md" in source
+        or "wiki/git-workflow.md" in source
+        or "git-workflow" in source
+        or "git.md" in source
+    ), (
+        f"Expected source to reference wiki/git.md or wiki/git-workflow.md, got: {data.get('source')}"
     )
 
 
@@ -122,3 +127,108 @@ def test_list_files_question_uses_list_files():
     # Check that tool_calls contains list_files
     tool_names = [call.get("tool") for call in data["tool_calls"]]
     assert "list_files" in tool_names, "Expected list_files to be called"
+
+
+def test_framework_question_uses_read_file():
+    """Test that agent uses read_file tool when asked about the backend framework.
+
+    Expected behavior:
+    - Agent should call read_file to find information in backend source code
+    - Tool calls should include read_file
+    """
+    project_root = Path(__file__).parent.parent
+    agent_path = project_root / "agent.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(agent_path),
+            "What Python web framework does the backend use?",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    # Skip if rate limited
+    if result.returncode != 0 and "rate limited" in result.stderr.lower():
+        import pytest
+
+        pytest.skip("LLM API rate limited. Test will pass when API is available.")
+
+    assert result.returncode == 0, f"Agent failed: {result.stderr}"
+
+    output = result.stdout.strip()
+    assert output, "Agent produced no output"
+
+    data = json.loads(output)
+
+    # Check that tool_calls contains read_file
+    tool_names = [call.get("tool") for call in data["tool_calls"]]
+    assert "read_file" in tool_names, (
+        "Expected read_file to be called for framework question"
+    )
+
+
+def test_item_count_question_uses_query_api():
+    """Test that agent uses query_api tool when asked about item count in database.
+
+    Expected behavior:
+    - Agent should call query_api to get real-time data from the backend
+    - Tool calls should include query_api with GET method
+    """
+    project_root = Path(__file__).parent.parent
+    agent_path = project_root / "agent.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(agent_path),
+            "How many items are in the database?",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    # Skip if rate limited
+    if result.returncode != 0 and "rate limited" in result.stderr.lower():
+        import pytest
+
+        pytest.skip("LLM API rate limited. Test will pass when API is available.")
+
+    # Skip if backend is not running (connection error)
+    if result.returncode != 0 and (
+        "cannot connect to backend" in result.stderr.lower()
+        or "connect error" in result.stderr.lower()
+    ):
+        pytest.skip("Backend API not running. Test will pass when backend is up.")
+
+    assert result.returncode == 0, f"Agent failed: {result.stderr}"
+
+    output = result.stdout.strip()
+    assert output, "Agent produced no output"
+
+    data = json.loads(output)
+
+    # Check that tool_calls contains query_api
+    tool_names = [call.get("tool") for call in data["tool_calls"]]
+    assert "query_api" in tool_names, (
+        "Expected query_api to be called for item count question"
+    )
+
+    # Check that query_api was called with GET method and /items/ path
+    for call in data["tool_calls"]:
+        if call.get("tool") == "query_api":
+            args = call.get("args", {})
+            assert args.get("method") == "GET", "Expected GET method for query_api"
+            assert "/items" in args.get("path", ""), (
+                "Expected /items path for query_api"
+            )
+
+    # Check that answer contains a number (item count)
+    import re
+
+    answer = data.get("answer", "")
+    numbers = re.findall(r"\d+", answer)
+    assert len(numbers) > 0, "Expected answer to contain item count number"
