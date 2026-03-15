@@ -375,10 +375,6 @@ def call_llm(
 
                 if response.status_code == 429:
                     if attempt < max_retries - 1:
-                        print(
-                            f"Rate limited, retrying in {retry_delay}s...",
-                            file=sys.stderr,
-                        )
                         time.sleep(retry_delay)
                         retry_delay *= 2
                         continue
@@ -390,10 +386,6 @@ def call_llm(
 
             except httpx.ReadTimeout as e:
                 if attempt < max_retries - 1:
-                    print(
-                        f"Request timed out, retrying in {retry_delay}s...",
-                        file=sys.stderr,
-                    )
                     time.sleep(retry_delay)
                     retry_delay *= 2
                     continue
@@ -422,8 +414,6 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
 
     # Agentic loop
     for iteration in range(MAX_TOOL_CALLS):
-        print(f"Iteration {iteration + 1}/{MAX_TOOL_CALLS}", file=sys.stderr)
-
         # Call LLM with tool definitions
         response = call_llm(messages, tools=TOOL_DEFINITIONS)
 
@@ -438,7 +428,6 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
 
         if tool_calls:
             # LLM wants to call tools
-            print(f"LLM returned {len(tool_calls)} tool call(s)", file=sys.stderr)
 
             # Add assistant message with tool calls
             messages.append(
@@ -453,8 +442,6 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
                 tool_name = tool_call["function"]["name"]
                 tool_args = json.loads(tool_call["function"]["arguments"])
                 tool_call_id = tool_call["id"]
-
-                print(f"Executing {tool_name}({tool_args})", file=sys.stderr)
 
                 # Execute tool
                 result = execute_tool(tool_name, tool_args)
@@ -484,7 +471,6 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
             # LLM returned content without tool calls - final answer
             # Note: Use (choice.get("content") or "") because LLM may return content: null
             answer = choice.get("content") or ""
-            print(f"LLM returned final answer", file=sys.stderr)
 
             # Extract source from answer (look for source reference)
             source = ""
@@ -520,7 +506,6 @@ def run_agentic_loop(question: str) -> dict[str, Any]:
             }
 
     # Max iterations reached
-    print("Max tool calls reached", file=sys.stderr)
     return {
         "answer": "Unable to find answer within maximum tool calls.",
         "source": "",
@@ -547,4 +532,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# f
