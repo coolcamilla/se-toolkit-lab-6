@@ -2,7 +2,7 @@
 
 ## Overview
 
-This agent answers questions using a Large Language Model (LLM) via an OpenAI-compatible API, with access to tools for reading files, listing directories, and querying the backend API.
+This agent answers questions using a Large Language Model (LLM) via an OpenAI-compatible API, with access to tools for reading files, listing directories, and querying  the backend API.
 
 ## LLM Provider
 
