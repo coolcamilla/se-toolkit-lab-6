@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a `query_api` tool to the agent so it can query the deployed backend API and answer data-dependent questions.
+Add a `query_api` tool to the agent so it can query the deployed backend API and answer data-dependent questions. 
 
 ## Tool Schema: `query_api`
 
@@ -10,7 +10,7 @@ Add a `query_api` tool to the agent so it can query the deployed backend API and
 
 - `method` (string, required): HTTP method — GET, POST, PUT, DELETE, etc.
 - `path` (string, required): API endpoint path, e.g., `/items/`, `/analytics/completion-rate`
-- `body` (string, optional): JSON request body for POST/PUT requests
+- `body` (string,  optional): JSON request body for POST/PUT requests
 
 ### Description for LLM
 
