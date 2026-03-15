@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lab assistant agent — answers questions using an LLM with tools.
+Lab  assistant agent — answers questions using an LLM with tools.
 
 Usage:
     uv run agent.py "What does REST stand for?"

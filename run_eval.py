@@ -2,7 +2,7 @@
 """Local evaluation runner for the agent benchmark.
 
 Fetches questions one at a time from the autochecker API,
-runs your agent, and checks the answer  locally.
+runs your agent, and checks the answer locally.
 Stops at the first failure.
 
 Usage:
@@ -148,15 +148,13 @@ def _match(text: str, rule: dict) -> bool:
         return bool(re.search(rule["regex"], text, re.IGNORECASE))
 
     if "numeric_gt" in rule:
-        # Match numbers but filter out standalone dots and invalid numbers
         numbers = re.findall(r"\d+(?:\.\d+)?", text)
-        return any(float(n) > rule["numeric_gt"] for n in numbers if n and n != ".")
+        return any(float(n) > rule["numeric_gt"] for n in numbers if n)
 
     if "numeric_range" in rule:
         lo, hi = rule["numeric_range"]
-        # Match numbers but filter out standalone dots and invalid numbers
         numbers = re.findall(r"\d+(?:\.\d+)?", text)
-        return any(lo <= float(n) <= hi for n in numbers if n and n != ".")
+        return any(lo <= float(n) <= hi for n in numbers if n)
 
     return False
 
